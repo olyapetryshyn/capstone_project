@@ -73,4 +73,5 @@ target_df = clickstream_data.join(purchase_data, clickstream_data['purchase_id']
 
 target_df = target_df.select(col('purchaseId'), col('purchaseTime'), col('billingCost'), col('isConfirmed'),
                              col('sessionId'), col('campaignId'), col('channelId'))
-target_df.write.parquet('../output/result.parquet')
+target_df.show()
+target_df.write.mode('overwrite').parquet('../output/result.parquet')
