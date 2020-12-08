@@ -81,7 +81,7 @@ clickstream_data = clickstream_data \
 target_df = clickstream_data.join(purchase_data, clickstream_data['purchase_id'] == purchase_data['purchaseId'], 'left')
 
 target_df = target_df.select(col('purchaseId'), col('purchaseTime'), col('billingCost'), col('isConfirmed'),
-                             col('sessionId'), col('eventType'), col('campaignId'), col('channelId'))
+                             col('sessionId'), col('campaignId'), col('channelId'))
 target_df.write.mode('overwrite').parquet('../output/result.parquet')
 
 # Task 2.1
