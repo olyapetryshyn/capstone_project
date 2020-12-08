@@ -82,42 +82,48 @@ target_df = clickstream_data.join(purchase_data, clickstream_data['purchase_id']
 
 target_df = target_df.select(col('purchaseId'), col('purchaseTime'), col('billingCost'), col('isConfirmed'),
                              col('sessionId'), col('campaignId'), col('channelId'))
-target_df.write.mode('overwrite').parquet('../output/result.parquet')
+target_df.write.mode('overwrite').parquet('../output/task1.1/target_schema.parquet')
 
 # Task 2.1
 
 target_df.createOrReplaceTempView('target')
 
-spark.sql('select distinct campaignId, sum(billingCost) as revenue from target '
-          'where isConfirmed = true '
-          'group by campaignId '
-          'order by revenue desc '
-          'limit 10').show()
+task21_sql = spark.sql('select distinct campaignId, sum(billingCost) as revenue from target '
+                       'where isConfirmed = true '
+                       'group by campaignId '
+                       'order by revenue desc '
+                       'limit 10')
 
-target_df.where('isConfirmed = true') \
+task21_df = target_df.where('isConfirmed = true') \
     .groupBy('campaignId') \
     .agg(sum('billingCost').alias('revenue')) \
     .orderBy(desc('revenue')) \
     .limit(10) \
-    .select('campaignId', 'revenue') \
-    .show()
+    .select('campaignId', 'revenue')
+
+task21_sql.write.mode('overwrite').parquet('../output/task2.1/plain_sql.parquet')
+task21_df.write.mode('overwrite').parquet('../output/task2.1/df_api.parquet')
 
 # Task 2.2
 
-spark.sql('select campaignId, first(channelId) as channelId, max(sessionCount) as maxSessions '
-          'from (select campaignId, channelId, count(distinct sessionId) as sessionCount '
-          'from target '
-          'group by campaignId, channelId '
-          'order by campaignId, sessionCount desc) '
-          'group by campaignId '
-          'order by maxSessions desc').show()
+task22_sql = spark.sql('select campaignId, first(channelId) as channelId, max(sessionCount) as maxSessions '
+                       'from (select campaignId, channelId, count(distinct sessionId) as sessionCount '
+                       'from target '
+                       'group by campaignId, channelId '
+                       'order by campaignId, sessionCount desc) '
+                       'group by campaignId '
+                       'order by maxSessions desc')
 
 task22_df = target_df.groupBy('campaignId', 'channelId') \
     .agg(countDistinct('sessionId').alias('sessionCount')) \
     .orderBy('campaignId', desc('sessionCount')) \
     .select('campaignId', 'channelId', 'sessionCount')
 
-task22_df.groupBy('campaignId') \
+task22_df = task22_df.groupBy('campaignId') \
     .agg(max('sessionCount').alias('maxSessions'), first('channelId').alias('channelId')) \
     .orderBy(desc('maxSessions')) \
-    .select('campaignId', 'channelId', 'maxSessions').show()
+    .select('campaignId', 'channelId', 'maxSessions')
+
+task22_sql.write.mode('overwrite').parquet('../output/task2.2/plain_sql.parquet')
+task22_df.write.mode('overwrite').parquet('../output/task2.2/df_api.parquet')
+
