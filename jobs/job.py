@@ -10,7 +10,12 @@ from pyspark.sql.functions import (
     regexp_replace,
     dense_rank,
     row_number,
-    last
+    last,
+    sum,
+    desc,
+    countDistinct,
+    max,
+    first
 )
 from pyspark.sql.types import (
     StructType,
@@ -22,7 +27,7 @@ from pyspark.sql.types import (
 
 spark = SparkSession \
     .builder \
-    .appName("spark_app") \
+    .appName('spark_app') \
     .getOrCreate()
 
 clickstream_schema = StructType() \
@@ -48,9 +53,9 @@ purchase_data = spark.read.format('csv') \
     .schema(purchase_schema) \
     .load('../data/user_purchases_0.csv.gz')
 
-
 win1 = Window.partitionBy(col('userId')).orderBy(col('eventTime'))
 win2 = Window.orderBy(col('sessionTs'))
+win3 = Window.orderBy('sessionId')
 
 clickstream_data = clickstream_data \
     .withColumn('firstTs', when(row_number().over(win1) == 1, col('eventTime'))) \
@@ -62,16 +67,57 @@ clickstream_data = clickstream_data \
                                   lit(2), length('attributes') - lit(2))).otherwise(col('attributes'))) \
     .withColumn('attr', when(col('eventType') == 'purchase',
                              regexp_replace(col('attrs'), '""', "'")).otherwise(col('attrs'))) \
-    .withColumn('campaignId', when(get_json_object('attr', '$.campaign_id').isNotNull(),
-                                   get_json_object('attr', '$.campaign_id')).otherwise(None)) \
-    .withColumn('channelId', when(get_json_object('attr', '$.channel_id').isNotNull(),
-                                  get_json_object('attr', '$.channel_id')).otherwise(None)) \
+    .withColumn('campaign_id', when(get_json_object('attr', '$.campaign_id').isNotNull(),
+                                    get_json_object('attr', '$.campaign_id')).otherwise(None)) \
+    .withColumn('channel_id', when(get_json_object('attr', '$.channel_id').isNotNull(),
+                                   get_json_object('attr', '$.channel_id')).otherwise(None)) \
     .withColumn('purchase_id', when(get_json_object('attr', '$.purchase_id').isNotNull(),
-                                    get_json_object('attr', '$.purchase_id')).otherwise(None))
+                                    get_json_object('attr', '$.purchase_id')).otherwise(None)) \
+    .withColumn('campaignId',
+                last(col('campaign_id'), ignorenulls=True).over(win3.rowsBetween(Window.unboundedPreceding, 0))) \
+    .withColumn('channelId',
+                last(col('channel_id'), ignorenulls=True).over(win3.rowsBetween(Window.unboundedPreceding, 0)))
 
 target_df = clickstream_data.join(purchase_data, clickstream_data['purchase_id'] == purchase_data['purchaseId'], 'left')
 
 target_df = target_df.select(col('purchaseId'), col('purchaseTime'), col('billingCost'), col('isConfirmed'),
-                             col('sessionId'), col('campaignId'), col('channelId'))
-target_df.show()
+                             col('sessionId'), col('eventType'), col('campaignId'), col('channelId'))
 target_df.write.mode('overwrite').parquet('../output/result.parquet')
+
+# Task 2.1
+
+target_df.createOrReplaceTempView('target')
+
+spark.sql('select distinct campaignId, sum(billingCost) as revenue from target '
+          'where isConfirmed = true '
+          'group by campaignId '
+          'order by revenue desc '
+          'limit 10').show()
+
+target_df.where('isConfirmed = true') \
+    .groupBy('campaignId') \
+    .agg(sum('billingCost').alias('revenue')) \
+    .orderBy(desc('revenue')) \
+    .limit(10) \
+    .select('campaignId', 'revenue') \
+    .show()
+
+# Task 2.2
+
+spark.sql('select campaignId, first(channelId) as channelId, max(sessionCount) as maxSessions '
+          'from (select campaignId, channelId, count(distinct sessionId) as sessionCount '
+          'from target '
+          'group by campaignId, channelId '
+          'order by campaignId, sessionCount desc) '
+          'group by campaignId '
+          'order by maxSessions desc').show()
+
+task22_df = target_df.groupBy('campaignId', 'channelId') \
+    .agg(countDistinct('sessionId').alias('sessionCount')) \
+    .orderBy('campaignId', desc('sessionCount')) \
+    .select('campaignId', 'channelId', 'sessionCount')
+
+task22_df.groupBy('campaignId') \
+    .agg(max('sessionCount').alias('maxSessions'), first('channelId').alias('channelId')) \
+    .orderBy(desc('maxSessions')) \
+    .select('campaignId', 'channelId', 'maxSessions').show()
