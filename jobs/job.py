@@ -38,32 +38,37 @@ def main():
     transformed_data.show()
     transformed_data.createOrReplaceTempView('target')
     load_data(transformed_data)
+    task_21_df_api(transformed_data)
+    task_21_sql(spark)
+    task_22_df_api(transformed_data)
+    task_22_sql(spark)
     spark.stop()
 
 
-def extract_clickstream_data(spark):
-    clickstream_schema = StructType() \
-        .add('userId', StringType(), False) \
-        .add('eventId', StringType(), False) \
-        .add('eventType', StringType(), False) \
-        .add('eventTime', TimestampType(), False) \
-        .add('attributes', StringType(), True)
+clickstream_schema = StructType() \
+    .add('userId', StringType(), False) \
+    .add('eventId', StringType(), False) \
+    .add('eventType', StringType(), False) \
+    .add('eventTime', TimestampType(), False) \
+    .add('attributes', StringType(), True)
 
-    clickstream_data = spark.read.format('csv') \
-        .options(header='True') \
-        .schema(clickstream_schema) \
-        .load('../data/mobile_app_clickstream_0.csv.gz')
-
-    return clickstream_data
-
-
-def extract_purchase_data(spark):
-    purchase_schema = StructType() \
+purchase_schema = StructType() \
         .add('purchaseId', StringType(), False) \
         .add('purchaseTime', TimestampType(), False) \
         .add('billingCost', DoubleType(), True) \
         .add('isConfirmed', BooleanType(), True)
 
+
+def extract_clickstream_data(spark):
+    clickstream_data = spark.read.format('csv') \
+        .options(header='True') \
+        .schema(clickstream_schema) \
+        .load('../data/mobile_app_clickstream/*.csv.gz')
+
+    return clickstream_data
+
+
+def extract_purchase_data(spark):
     purchase_data = spark.read.format('csv') \
         .options(header='True') \
         .schema(purchase_schema) \
@@ -115,7 +120,7 @@ def task_21_sql(spark):
                            'group by campaignId '
                            'order by revenue desc '
                            'limit 10')
-    task21_sql.write.mode('overwrite').parquet('../output/task2.1/plain_sql.parquet')
+    task21_sql.write.parquet('../output/task2.1/plain_sql', mode='overwrite')
     return task21_sql
 
 
@@ -126,7 +131,7 @@ def task_21_df_api(df):
         .orderBy(desc('revenue')) \
         .limit(10) \
         .select('campaignId', 'revenue')
-    task21_df.write.mode('overwrite').parquet('../output/task2.1/df_api.parquet')
+    task21_df.write.parquet('../output/task2.1/df_api', mode='overwrite')
     return task21_df
 
 # Task 2.2
@@ -140,7 +145,7 @@ def task_22_sql(spark):
                            'order by campaignId, sessionCount desc) '
                            'group by campaignId '
                            'order by maxSessions desc')
-    task22_sql.write.mode('overwrite').parquet('../output/task2.2/plain_sql.parquet')
+    task22_sql.write.parquet('../output/task2.2/plain_sql', mode='overwrite')
     return task22_sql
 
 
@@ -150,12 +155,12 @@ def task_22_df_api(df):
         .orderBy('campaignId', desc('sessionCount')) \
         .select('campaignId', 'channelId', 'sessionCount')
 
-    task22_df = task22_df.groupBy('campaignId') \
+    task22_df_ = task22_df.groupBy('campaignId') \
         .agg(max('sessionCount').alias('maxSessions'), first('channelId').alias('channelId')) \
         .orderBy(desc('maxSessions')) \
         .select('campaignId', 'channelId', 'maxSessions')
-    task22_df.write.mode('overwrite').parquet('../output/task2.2/df_api.parquet')
-    return task22_df
+    task22_df_.write.parquet('../output/task2.2/df_api', mode='overwrite')
+    return task22_df_
 
 
 if __name__ == '__main__':
