@@ -35,9 +35,11 @@ def main():
     clicks_data = extract_clickstream_data(spark)
     purchases_data = extract_purchase_data(spark)
     transformed_data = transform_data(clicks_data, purchases_data)
+    # transformed_data_udf = transform_data_with_udf(clicks_data, purchases_data)
     transformed_data.show()
     transformed_data.createOrReplaceTempView('target')
     load_data(transformed_data)
+    # load_data(transformed_data_with_udf)
     task_21_df_api(transformed_data)
     task_21_sql(spark)
     task_22_df_api(transformed_data)
@@ -108,7 +110,60 @@ def transform_data(clickstream_data, purchase_data):  # Task 1.1
 
 
 def load_data(df):
-    df.write.mode('overwrite').parquet('../output/task1.1/target_schema.parquet')
+    df.write.parquet('../output/task1.1/target_schema', mode='overwrite')
+
+
+# Task 1.2
+
+count_sessions = 0
+
+
+def app_open_flag(event_type):
+    global count_sessions
+    if event_type == 'app_open':
+        session_id = count_sessions
+        count_sessions += 1
+        return session_id
+    else:
+        return None
+
+
+def clear_attributes(event_type, attributes):
+    attr = attributes
+    if event_type == 'purchase':
+        attrs_len = len(attributes)
+        attr = attributes[1:attrs_len-1].replace('""', "'")
+    return attr
+
+
+app_open = udf(app_open_flag, IntegerType())
+attributes_udf = udf(clear_attributes, StringType())
+
+
+def transform_data_with_udf(clickstream_data, purchase_data):
+    win1 = Window.partitionBy('userId').orderBy('eventTime')
+    win2 = Window.orderBy('sessionId')
+
+    clickstream_data = clickstream_data \
+        .withColumn('appOpenFlag', app_open(clickstream_data['eventType'])) \
+        .withColumn('sessionId', sum(col('appOpenFlag')).over(win1)) \
+        .withColumn('attr', attributes_udf(clickstream_data['eventType'], clickstream_data['attributes'])) \
+        .withColumn('campaign_id', when(get_json_object('attr', '$.campaign_id').isNotNull(),
+                                        get_json_object('attr', '$.campaign_id')).otherwise(None)) \
+        .withColumn('channel_id', when(get_json_object('attr', '$.channel_id').isNotNull(),
+                                       get_json_object('attr', '$.channel_id')).otherwise(None)) \
+        .withColumn('purchase_id', when(get_json_object('attr', '$.purchase_id').isNotNull(),
+                                        get_json_object('attr', '$.purchase_id')).otherwise(None)) \
+        .withColumn('campaignId',
+                    last(col('campaign_id'), ignorenulls=True).over(win2.rowsBetween(Window.unboundedPreceding, 0))) \
+        .withColumn('channelId',
+                    last(col('channel_id'), ignorenulls=True).over(win2.rowsBetween(Window.unboundedPreceding, 0)))
+    target_df = clickstream_data.join(purchase_data, clickstream_data['purchase_id'] == purchase_data['purchaseId'],
+                                      'left')
+
+    target_df = target_df.select(col('purchaseId'), col('purchaseTime'), col('billingCost'), col('isConfirmed'),
+                                 col('sessionId'), col('campaignId'), col('channelId'))
+    return target_df
 
 
 # Task 2.1
